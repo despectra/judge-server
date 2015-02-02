@@ -10,13 +10,17 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/time.h>
+#include "solutions_db.h"
 #include "thread_pool.h"
 #include "utils.h"
 #include "uthash.h"
+#include "utlist.h"
 
 #define PORT 42016
 
 #define OP_CODE_CMP_LIST 0x89
+#define OP_CODE_CHK_SLN 0x10
 
 typedef struct {
     int socket;
@@ -25,8 +29,24 @@ typedef struct {
 } client_args;
 
 typedef struct {
+    uint16 id;
+    client_ptr* clients_list;
+    UT_hash_handle hh;
+} compiler_def;
 
-} compilers_map;
+typedef struct client_ptr {
+    uint32 id;
+    struct client_ptr* next, prev;
+} client_ptr;
+
+typedef struct {
+    uint32 id;
+    int socket;
+    uint32 loading;
+    queue* solutions_queue;
+    pthread_mutex_t* queue_mutex;
+    UT_hash_handle hh;
+} client_def;
 
 void start_server();
 

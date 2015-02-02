@@ -14,7 +14,8 @@ HEADERS += \
     server.h \
     utils.h \
     solutions_db.h \
-    uthash.h
+    uthash.h \
+    utlist.h
 
 QMAKE_CFLAGS += -std=c99 -pthread $(mysql_config --cflags)
 QMAKE_LFLAGS += $(mysql_config --libs)
