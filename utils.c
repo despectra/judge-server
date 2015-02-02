@@ -15,10 +15,10 @@ data_block read_string(char* data, uint32 length) {
     return block;
 }
 
-data_block* block_init(char* data, unsigned int length) {
+data_block* block_init(void* data, uint32 length) {
     data_block* block = (data_block*) malloc(sizeof(data_block));
     block->length = length;
-    block->data = (char*) malloc(length * sizeof(char));
+    block->data = malloc(length * sizeof(char));
     memcpy(block->data, data, length);
     return block;
 }
@@ -36,6 +36,7 @@ queue* queue_init() {
     q->elems_count = 0;
     q->head = NULL;
     q->tail = NULL;
+    return q;
 }
 
 data_block* queue_pop(queue* q) {

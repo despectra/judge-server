@@ -20,14 +20,14 @@ typedef long long int64;
  */
 
 typedef struct {
-    char* data;
+    void* data;
     uint32 length;
 } data_block;
 
 /*
 * initializes generic data block with size 'length'
 */
-data_block* block_init(char* data, uint32 length);
+data_block* block_init(void* data, uint32 length);
 
 void block_free(data_block* block);
 

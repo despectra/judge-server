@@ -15,9 +15,7 @@ thread_pool* init_thread_pool(int threads_num) {
     pthread_mutex_init(pool->mutex, NULL);
     pthread_mutex_init(pool->mutex_free, NULL);
     pthread_cond_init(pool->cond, NULL);
-    pool->tasks_count = 0;
-    pool->queue_begin = NULL;
-    pool->queue_end = NULL;
+    pool->tasks_queue = queue_init();
     pool->threads = (pthread_t*) malloc(threads_num * sizeof(pthread_t));
 
     pthread_t* thread;
@@ -42,12 +40,9 @@ void destroy_thread_pool(thread_pool* pool) {
     pthread_mutex_destroy(pool->mutex);
     pthread_mutex_destroy(pool->mutex_free);
     pthread_cond_destroy(pool->cond);
-    task* t;
-    while(pool->queue_begin != NULL) {
-        t = pool->queue_begin;
-        pool->queue_begin = t->next;
-        free(t);
-    }
+
+    queue_iterate(pool->tasks_queue, block_free);
+    queue_struct_free(pool->tasks_queue);
     free(pool);
 }
 
@@ -55,17 +50,11 @@ void thread_pool_execute(thread_pool* pool, void* (*func)(void*), void* arg) {
     task* t = (task*) malloc(sizeof(task));
     t->task_func = func;
     t->arg = arg;
-    t->next = NULL;
     
     pthread_mutex_lock(pool->mutex);
-    if(pool->queue_end != NULL) {
-        pool->queue_end->next = t;
-    }
-    if(pool->queue_begin == NULL) {
-        pool->queue_begin = t;
-    }
-    pool->queue_end = t;
-    pool->tasks_count++;
+
+    data_block* task_block = block_init(t, sizeof(*t));
+    queue_push(pool->tasks_queue, task_block);
     
     pthread_cond_signal(pool->cond);
     pthread_mutex_unlock(pool->mutex);
@@ -79,26 +68,23 @@ void* thread_exec(void* args) {
     stamp = ((stamp / 100) % 10) * 100 + ((stamp / 10) % 10) * 10 + (stamp % 10);
     while(!pool->cancelled) {
         pthread_mutex_lock(pool->mutex);
-        while(!pool->cancelled && pool->queue_begin == NULL) {
+        while(!pool->cancelled && pool->tasks_queue->elems_count == 0) {
             pthread_cond_wait(pool->cond, pool->mutex);
         }
         if(pool->cancelled) {
             pthread_mutex_unlock(pool->mutex);
             return NULL;
         }
-        task* t = pool->queue_begin;
-        pool->queue_begin = t->next;
-        pool->queue_end = (t == pool->queue_end ? NULL : pool->queue_end);
-        pool->tasks_count--;
+        data_block* task_block = queue_pop(pool->tasks_queue);
+        task* t = (task*) task_block->data;
         pthread_mutex_unlock(pool->mutex);
-        printf("%d: Running, remaining %d\n", stamp, pool->tasks_count);
+        printf("%d: Running task, remaining %d\n", stamp, pool->tasks_queue->elems_count);
         t->task_func(t->arg);
         printf("%d: Done \n", stamp);
         pthread_mutex_lock(pool->mutex_free);
         t->task_func = NULL;
         t->arg = NULL;
-        t->next = NULL;
-        free(t);
+        block_free(task_block);
         pthread_mutex_unlock(pool->mutex_free);
     }
     return NULL;

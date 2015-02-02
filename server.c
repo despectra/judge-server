@@ -30,7 +30,7 @@ void start_server() {
     client_addrlen = sizeof(struct sockaddr_in);
     printf("Judge Server v 0.1\nWaiting for incoming connections\n");
 
-    thread_pool* pool = init_thread_pool(20);
+    thread_pool* pool = init_thread_pool(2);
     //thread_pool_execute(pool, poll_database, NULL);
     while((client_socket = accept(listener, (struct sockaddr*)&client_addr, (socklen_t*)&client_addrlen))) {
         printf("New client\n");
