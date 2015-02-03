@@ -28,6 +28,6 @@ typedef struct {
 
 int solutions_init_db();
 void solutions_close_db();
-int solutions_extract_new(solution *sln_arr, uint64 *sln_arr_len);
+int solutions_extract_new(solution* sln_arr, uint64* sln_arr_len);
 
 #endif // SOLUTIONS_DB_H

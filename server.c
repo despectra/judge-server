@@ -13,7 +13,6 @@ pthread_mutex_t* compilers_map_lock;
 pthread_mutex_t* clients_map_lock;
 pthread_mutex_t* db_lock;
 
-
 void* client_loop(void *args);
 void* poll_database(void* args);
 
@@ -46,19 +45,17 @@ void start_server() {
     client_addrlen = sizeof(struct sockaddr_in);
     printf("Judge Server v 0.1\nWaiting for incoming connections\n");
 
-
-    thread_pool* pool = init_thread_pool(2);
+    thread_pool* pool = init_thread_pool(THREAD_POOL_CAPACITY);
     compilers_map_lock = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
     clients_map_lock = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
     db_lock = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(compilers_map_lock, NULL);
     pthread_mutex_init(clients_map_lock, NULL);
     pthread_mutex_init(db_lock, NULL);
-
     //thread_pool_execute(pool, poll_database, NULL);
     while((client_socket = accept(listener, (struct sockaddr*)&client_addr, (socklen_t*)&client_addrlen))) {
         printf("New client\n");
-        client_args* args = (client_args*) malloc(sizeof(client_args));
+        endpoint* args = (endpoint*) malloc(sizeof(endpoint));
         args->socket = client_socket;
         args->addr = *((struct sockaddr*)&client_addr);
         args->addrlen = client_addrlen;
@@ -68,7 +65,7 @@ void start_server() {
     destroy_thread_pool(pool);
 }
 
-void transfer_all(int socket, bool do_send, const char* data, socklen_t data_len) {
+int transfer_all(int socket, bool do_send, const char* data, socklen_t data_len) {
     int transfered;
     char* cur_data_ptr = data;
     socklen_t remaining_len = data_len;
@@ -85,31 +82,39 @@ void transfer_all(int socket, bool do_send, const char* data, socklen_t data_len
         cur_data_ptr += transfered;
         remaining_len -= transfered;
     }
+    return cur_data_ptr - data;
 }
 
-void send_all(int socket, const char* data, socklen_t data_len) {
-    transfer_all(socket, true, data, data_len);
+int send_all(int socket, const char* data, socklen_t data_len) {
+   return transfer_all(socket, true, data, data_len);
 }
 
-void recv_all(int socket, const char* data, socklen_t data_len) {
-    transfer_all(socket, false, data, data_len);
+int recv_all(int socket, const char* data, socklen_t data_len) {
+   return transfer_all(socket, false, data, data_len);
 }
 
 void* client_loop(void* args) {
-    client_args* client = (client_args*) args;
-    int client_sock = client->socket;
+    endpoint* ep = (endpoint*) args;
+    int client_sock = ep->socket;
     setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, (char*) &recv_timeout, sizeof(recv_timeout));
 
     send_all(client_sock, (char*)&welcome_pkt[0], welcome_pkt_len);
 
-    //get response packet length
     uint16 res_len;
-    recv_all(client_sock, (char*) &res_len, sizeof(res_len));
+    int recvd = recv_all(client_sock, (char*) &res_len, sizeof(res_len));
+    if(recvd != sizeof(res_len)) {
+		perror("Error while receiving handshake packet\n");
+		return NULL;
+	}
     res_len = ntohs(res_len);
 
     char* res_pkt = (char*) malloc(res_len * sizeof(char));
     char* res_pkt_ptr = res_pkt;
-    recv_all(client_sock, res_pkt, res_len);
+    recvd = recv_all(client_sock, res_pkt, res_len);
+	if(recvd != res_len) {
+		perror("Error while receiving handshake packet\n");
+		return NULL;
+	}
 
     uint8 op_code = *res_pkt++;
     printf("Opcode %d\n", op_code);
@@ -117,7 +122,7 @@ void* client_loop(void* args) {
         perror("Client is inadequate\n");
         free(res_pkt_ptr);
         free(args);
-        return;
+        return NULL;
     }
 
     uint8 compilers_count = *res_pkt++;
@@ -139,16 +144,14 @@ void* client_loop(void* args) {
     pthread_mutex_lock(compilers_map_lock);
     for(int i = 0; i < compilers_count; i++) {
         uint16 compiler_id = compilers_ids[i];
-
         compiler_def* compiler;
         HASH_FIND_INT(compilers_map, &compiler_id, compiler);
         if(compiler == NULL) {
             compiler = compiler_create(compiler_id);
             HASH_ADD_INT(compilers_map, id, compiler);
         }
-
-        client_ptr* clt_ptr = (client_ptr*) malloc(sizeof(client_ptr));
-        clt_ptr->id = new_client_id;
+        client_ptr* clnt_ptr = (client_ptr*) malloc(sizeof(client_ptr));
+        clnt_ptr->id = new_client_id;
         DL_PREPEND(compiler->clients_list, clt_ptr);
     }
     pthread_mutex_unlock(compilers_map_lock);
@@ -186,6 +189,8 @@ compiler_def* compiler_create(uint16 id) {
     compiler_def* c = (compiler_def*) malloc(sizeof(compiler_def));
     c->id = id;
     c->clients_list = NULL;
+    c->list_mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(c->list_mutex, NULL);
     return c;
 }
 
@@ -198,7 +203,7 @@ void process_solutions(client_def* client) {
     pthread_mutex_unlock(client->queue_mutex);
 
     solution* sln = (solution*) sln_block->data;
-    uint32 pkt_length = 1 + sizeof(sln->id) + sizeof(uint32) + sln->source_len;
+    uint32 pkt_length = sizeof(char) + sizeof(sln->id) + sizeof(uint32) + sln->source_len;
     char* pkt = (char*) malloc(pkt_length * sizeof(char));
     char* pkt_ptr = pkt;
     *pkt++ = OP_CODE_CHK_SLN;
@@ -215,10 +220,64 @@ void process_solutions(client_def* client) {
 }
 
 void* poll_database(void *args) {
+	solution* new_solutions = NULL;
+	uint64* count = NULL;
+	
     while(true) {
         sleep(5);
         pthread_mutex_lock(db_lock);
-        //poll
+        int result = solutions_extract_new(new_solutions, count);
         pthread_mutex_unlock(db_lock);
+        
+        if(result != 0) {
+			perror("Error while extracting solutions from DB\n");
+			continue;
+		}
+		for(uint64 i = 0; i < *count; i++) {
+			solution* sln = new_solutions[i];
+			uint32 compiler_id = sln->compiler_id;
+			compiler_def* compiler = NULL;
+			HASH_FIND_INT(compilers_map, &compiler_id, compiler);
+			if(compiler == NULL) {
+				//no available compiler
+				//TODO report error via DB row
+				continue;
+			}
+			
+			pthread_mutex_lock(clients_map_lock);
+			pthread_mutex_lock(compiler->list_mutex);
+			int min_loading = 99999;
+			client_def* cur_client;
+			client_def* most_free_client = NULL;
+			DL_FOREACH(compiler->clients_list, cur_client) {
+				uint32 id = cur_client->id;
+				HASH_FIND_INT(clients_map, &id, cur_client);
+				if(cur_client == NULL) {
+					perror("There isn't client in the hash map (but it's still in DL list)");
+					continue;
+				}
+				if(cur_client->loading == 0) {
+					most_free_client = cur_client;
+					break;
+				}
+				if(cur_client->loading < min_loading) {
+					min_loading = client->loading;
+					most_free_client = cur_client;
+				}
+			}
+			if(most_free_client == NULL) {
+				perror("Most free client-checker wasn't found");
+				//TODO find another client
+			}
+			pthread_mutex_unlock(compiler->list_mutex);
+			pthread_mutex_unlock(clients_map_lock);
+			
+			data_block* solution_block = block_init(sln, sizeof(sln));
+			pthread_mutex_lock(most_free_client->queue_mutex);
+			queue_push(most_free_client->solutions_queue, solution_block);
+			pthread_mutex_unlock(most_free_client->queue_mutex);
+			
+			solution_free(sln);
+		}
     }
 }

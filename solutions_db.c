@@ -16,7 +16,7 @@ int solutions_init_db() {
     return 0;
 }
 
-int solutions_extract_new(solution *sln_arr, uint64 *sln_arr_len) {
+int solutions_extract_new(solution* sln_arr, uint64* sln_arr_len) {
     if (mysql_query(conn, "select * from solutions where checking = 0")) {
         fprintf(stderr, "%s\n", mysql_error(conn));
         return 1;
@@ -36,6 +36,7 @@ int solutions_extract_new(solution *sln_arr, uint64 *sln_arr_len) {
     if(sln_arr == NULL) {
         return 3;
     }
+    
     solution* cur_ptr = sln_arr;
     uint32* rows_lengths;
     while((row = mysql_fetch_row(result)) != NULL) {
@@ -55,6 +56,7 @@ int solutions_extract_new(solution *sln_arr, uint64 *sln_arr_len) {
         memcpy(cur_ptr->response, row[8], cur_ptr->response_len);
         cur_ptr += sizeof(solution);
     }
+    
     mysql_free_result(result);
     return 0;
 }
@@ -62,4 +64,13 @@ int solutions_extract_new(solution *sln_arr, uint64 *sln_arr_len) {
 
 void solutions_close_db() {
     mysql_close(conn);
+}
+
+void solution_free(solution* sln) {
+	if(sln == NULL) {
+		return;
+	}
+	free(sln->source);
+	free(sln->response);
+	free(sln);
 }
