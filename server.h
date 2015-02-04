@@ -21,36 +21,35 @@
 
 #define THREAD_POOL_CAPACITY 20
 
-#define OP_CODE_CMP_LIST 0x89
-#define OP_CODE_CHK_SLN 0x10
+#define OP_COMPILERS_LIST 0x89
+#define OP_CHECK_SLN 0x10
 
 typedef struct {
     int socket;
     struct sockaddr addr;
     socklen_t addrlen;
-} endpoint;
+} endpoint_t;
 
-typedef struct client_ptr {
+typedef struct {
     uint32 id;
-    struct client_ptr* next;
-    struct client_ptr* prev;
-} client_ptr;
+    UT_hash_handle hh;
+} client_id_t;
 
 typedef struct {
     uint16 id;
-    client_ptr* clients_list;
+    client_id_t* clients_list;
     pthread_mutex_t* list_mutex;
     UT_hash_handle hh;
-} compiler_def;
+} compiler_t;
 
 typedef struct {
     uint32 id;
-    int socket;
+    endpoint_t* endpoint;
     uint32 loading;
     queue* solutions_queue;
-    pthread_mutex_t* queue_mutex;
+    pthread_mutex_t* mutex;
     UT_hash_handle hh;
-} client_def;
+} client_t;
 
 void start_server();
 
