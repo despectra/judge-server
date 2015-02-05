@@ -2,6 +2,8 @@
 #define UTILS_H
 
 #include <stdlib.h>
+#include <bits/pthreadtypes.h>
+#include <stdio.h>
 
 #define max(a,b) (((a) > (b)) ? (a) : (b))
 #define min(a,b) (((a) < (b)) ? (a) : (b))
@@ -43,7 +45,7 @@ typedef struct q_elem {
 } queue_elem;
 
 typedef struct {
-    int elems_count;
+    uint32 elems_count;
     queue_elem* head;
     queue_elem* tail;
 } queue;
@@ -72,5 +74,30 @@ void queue_iterate(queue* q, void (*print_func)(data_block* block));
 * must be called only after each data_block in queue has been free()d
 */
 void queue_struct_free(queue* q);
+
+/*
+ * Simple file logger (thread safe)
+ */
+
+typedef struct {
+    const char* fname;
+    FILE* fd;
+    pthread_mutex_t* mutex;
+} logger_t;
+
+/*
+Creates new instance of file logger
+ */
+logger_t* logger_init();
+
+/*
+Writes formatted string to log
+ */
+void logger_printf(logger_t* logger, const char* format, ...);
+
+/*
+ Free resources associated with this logger
+ */
+void logger_destroy(logger_t* logger);
 
 #endif // UTILS_H

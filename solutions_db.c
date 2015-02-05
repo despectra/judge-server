@@ -7,10 +7,12 @@ const char* user = "contestphp";
 const char* password = "c0nt3st";
 const char* database = "contestphp";
 
-int solutions_init_db() {
+logger_t* logger;
+
+int solutions_init_db(logger_t* in_logger) {
     conn = mysql_init(NULL);
     if(!mysql_real_connect(conn, server, user, password, database, 0, NULL, 0)) {
-        fprintf(stderr, "%s\n", mysql_error(conn));
+        logger_printf(logger, "MYSQL %s", mysql_error(conn));
         return 1;
     }
     return 0;
@@ -18,7 +20,7 @@ int solutions_init_db() {
 
 int solutions_extract_new(solution* sln_arr, uint64* sln_arr_len) {
     if (mysql_query(conn, "select * from solutions where checking = 0")) {
-        fprintf(stderr, "%s\n", mysql_error(conn));
+        logger_printf(logger, "MYSQL %s\n", mysql_error(conn));
         return 1;
     }
     MYSQL_ROW row;
@@ -63,6 +65,7 @@ int solutions_extract_new(solution* sln_arr, uint64* sln_arr_len) {
 
 
 void solutions_close_db() {
+    logger = NULL;
     mysql_close(conn);
 }
 

@@ -24,6 +24,10 @@
 #define OP_COMPILERS_LIST 0x89
 #define OP_CHECK_SLN 0x10
 
+#define ERR_NOCOMPILER 1
+#define ERR_NOCLIENTS 2
+#define
+
 typedef struct {
     int socket;
     struct sockaddr addr;
@@ -45,12 +49,12 @@ typedef struct {
 typedef struct {
     uint32 id;
     endpoint_t* endpoint;
-    uint32 loading;
     queue* solutions_queue;
+    solution* checking_solution;
     pthread_mutex_t* mutex;
     UT_hash_handle hh;
 } client_t;
 
-void start_server();
+void run_server(logger_t* logger);
 
 #endif // SERVER_H

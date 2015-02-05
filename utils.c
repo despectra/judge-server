@@ -1,3 +1,6 @@
+#include <string.h>
+#include <pthread.h>
+#include <stdarg.h>
 #include "utils.h"
 
 data_block read_string(char* data, uint32 length) {
@@ -99,4 +102,63 @@ void queue_struct_free(queue* q) {
         free(prev_elem);
     }
     free(q);
+}
+
+struct tm* getcurtime() {
+    time_t cur_time;
+    time(&cur_time);
+    return localtime(&cur_time);
+}
+
+logger_t* logger_init() {
+    const char* fname = "log.txt";
+    FILE* logfile = fopen(fname, "a");
+    if(logfile == NULL) {
+        perror("Unable to open file log.txt");
+        return NULL;
+    }
+    struct tm* curtime = getcurtime();
+
+    char str[50];
+    strftime(str, 50, "%d.%m.%Y at %H:%M:%S", curtime);
+    fprintf(logfile, "#### Logging started [%s] ####\n", str);
+
+    logger_t* logger = (logger_t*) malloc(sizeof(logger_t));
+    logger->mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(logger->mutex, NULL);
+    logger->fname = fname;
+    logger->fd = logfile;
+    return logger;
+}
+
+void logger_printf(logger_t* logger, const char* format, ...) {
+    if(logger == NULL || logger->fd == NULL) {
+        return;
+    }
+    pthread_mutex_lock(logger->mutex);
+    struct tm* curtime = getcurtime();
+    char timestr[50];
+    strftime(timestr, 50, "%d.%m.%Y %H:%M:%S", curtime);
+    fprintf(logger->fd, "[%s] THREAD %lu: ", timestr, pthread_self());
+    va_list args;
+    va_start(args, format);
+    vfprintf(logger->fd, format, args);
+    va_end(args);
+    fprintf(logger->fd, "\n");
+    pthread_mutex_unlock(logger->mutex);
+}
+
+void logger_destroy(logger_t* logger) {
+    if(logger == NULL) {
+        return;
+    }
+    pthread_mutex_lock(logger->mutex);
+    struct tm* curtime = getcurtime();
+    char str[50];
+    strftime(str, 50, "%d.%m.%Y at %H:%M:%S", curtime);
+    fprintf(logger->fd, "><>< Logging ended [%s] ><><\n\n", str);
+    fclose(logger->fd);
+    pthread_mutex_unlock(logger->mutex);
+    pthread_mutex_destroy(logger->mutex);
+    free(logger);
 }

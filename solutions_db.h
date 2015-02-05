@@ -26,7 +26,7 @@ typedef struct {
     uint8 response_len;
 } solution;
 
-int solutions_init_db();
+int solutions_init_db(logger_t* logger);
 void solutions_close_db();
 int solutions_extract_new(solution* sln_arr, uint64* sln_arr_len);
 void solution_free(solution* sln);
