@@ -16,7 +16,7 @@ typedef struct {
     uint32 id;
     uint32 user_id;
     uint32 task_id;
-    time_t time;
+    time_t* time;
     char* source;
     uint32 source_len;
     uint32 compiler_id;

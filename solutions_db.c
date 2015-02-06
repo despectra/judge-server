@@ -25,12 +25,12 @@ int solutions_extract_new(solution* sln_arr, uint64* sln_arr_len) {
     }
     MYSQL_ROW row;
     MYSQL_RES* result = mysql_use_result(conn);
-    if(mysql_field_count(result) != FIELDS_COUNT) {
+    if(mysql_field_count(conn) != FIELDS_COUNT) {
         return 2;
     }
 
     if(sln_arr_len == NULL) {
-        sln_arr_len = (uint64) malloc(sizeof(uint64));
+        sln_arr_len = (uint64*) malloc(sizeof(uint64));
     }
 
     *sln_arr_len = (uint64) mysql_num_rows(result);

@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 #include "server.h"
 #include "solutions_db.h"
 #include "utils.h"
@@ -21,7 +23,7 @@ pthread_mutex_t* db_mutex;
 void* client_loop(void* args);
 void process_solutions(client_t* client);
 void* poll_database(void* args);
-int push_solution(data_block* solution);
+int push_solution(data_block* sln_block);
 client_t* client_create(endpoint_t* ep, uint32 id);
 compiler_t* compiler_create(uint16 id);
 void client_free(client_t* client);
@@ -75,19 +77,19 @@ void run_server(logger_t* in_logger) {
     destroy_thread_pool(pool);
 }
 
-uint64 transfer_all(int socket, bool do_send, char* data, socklen_t data_len) {
-    uint32 transferred;
+ssize_t transfer_all(int socket, bool do_send, char* data, socklen_t data_len) {
+    ssize_t transferred = 0;
     char* cur_data_ptr = data;
     socklen_t remaining_len = data_len;
     while(remaining_len > 0) {
-        transferred = (uint32) (do_send
+        transferred = do_send
                 ? send(socket, cur_data_ptr, remaining_len, 0)
-                : recv(socket, cur_data_ptr, remaining_len, 0));
+                : recv(socket, cur_data_ptr, remaining_len, 0);
         if(transferred <= 0) {
             if(transferred < 0) {
                 //TODO notify error
             }
-            break;
+            return transferred;
         }
         cur_data_ptr += transferred;
         remaining_len -= transferred;
@@ -95,11 +97,11 @@ uint64 transfer_all(int socket, bool do_send, char* data, socklen_t data_len) {
     return cur_data_ptr - data;
 }
 
-uint64 send_all(int socket, char* data, socklen_t data_len) {
+ssize_t send_all(int socket, char* data, socklen_t data_len) {
    return transfer_all(socket, true, data, data_len);
 }
 
-uint64 recv_all(int socket, char* data, socklen_t data_len) {
+ssize_t recv_all(int socket, char* data, socklen_t data_len) {
    return transfer_all(socket, false, data, data_len);
 }
 
@@ -111,7 +113,7 @@ void* client_loop(void* args) {
     send_all(client_sock, (char*) &welcome_pkt[0], welcome_pkt_len);
 
     uint16 res_len;
-    uint64 recvd = recv_all(client_sock, (char*) &res_len, sizeof(res_len));
+    ssize_t recvd = recv_all(client_sock, (char*) &res_len, sizeof(res_len));
     if(recvd != sizeof(res_len)) {
 		logger_printf(logger, "Error while receiving handshake packet (length part)");
 		return NULL;
@@ -170,17 +172,29 @@ void* client_loop(void* args) {
     pthread_mutex_unlock(compilers_map_mutex);
 
     logger_printf(logger, "Client loop started");
+    int err;
     while(server_running) {
         // TODO ...test this too
         process_solutions(client);
 
         logger_printf(logger, "Waiting some data from client....");
-        recv_all(client_sock, (char*) &res_len, sizeof(res_len));
-        if(errno == EAGAIN || errno == EWOULDBLOCK) {
-            logger_printf(logger, "Timeout, loop again");
-            continue; //timeout
+        printf("Waiting some data from client....\n");
+        recvd = recv_all(client_sock, (char*) &res_len, sizeof(res_len));
+        if(recvd <= 0) {
+            err = errno;
+            if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                logger_printf(logger, "Timeout, loop again");
+                printf("Timeout, loop again\n");
+                continue; //timeout
+            } else if(errno == ECONNRESET) {
+                //client disconnected unexpectedly
+                //TODO if there's a solutions in a queue, delegate them to another clients
+                //TODO delete all records about this client and decrease last_client_id
+                break;
+            }
         }
         logger_printf(logger, "Received something");
+        printf("Received something\n");
         //TODO implement response processing
     }
 
@@ -232,9 +246,9 @@ void process_solutions(client_t* client) {
     sln->source_len = htonl(sln->source_len);
     sln->compiler_id = htonl(sln->compiler_id);
 
-    memcpy(pkt, &sln->id, sizeof(sln->id));
+    *((uint32*)pkt) = sln->id;
     pkt += sizeof(sln->id);
-    memcpy(pkt, &sln->source_len, sizeof(sln->source_len));
+    *((uint32*)pkt) = sln->source_len;
     pkt += sizeof(sln->source_len);
     memcpy(pkt, &sln->compiler_id, sizeof(sln->compiler_id));
     pkt += sizeof(sln->compiler_id);
@@ -274,8 +288,8 @@ void* poll_database(void* args) {
     return NULL;
 }
 
-int push_solution(data_block* solution) {
-    solution* sln = (solution*) solution->data;
+int push_solution(data_block* sln_block) {
+    solution* sln = (solution*) sln_block->data;
     uint32 compiler_id = sln->compiler_id;
     logger_printf(logger, "SLN %d: Choosing client for checking  solution on compiler %d", sln->id, compiler_id);
     compiler_t* compiler = NULL;
@@ -327,7 +341,7 @@ int push_solution(data_block* solution) {
 
     logger_printf(logger, "SLN %d: Client found, pushing solution to it's queue", sln->id);
     pthread_mutex_lock(most_free_client->mutex);
-    queue_push(most_free_client->solutions_queue, solution);
+    queue_push(most_free_client->solutions_queue, sln_block);
     pthread_mutex_unlock(most_free_client->mutex);
     return 0;
 }

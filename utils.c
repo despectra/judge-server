@@ -112,7 +112,7 @@ struct tm* getcurtime() {
 
 logger_t* logger_init() {
     const char* fname = "log.txt";
-    FILE* logfile = fopen(fname, "a");
+    FILE* logfile = fopen(fname, "w");
     if(logfile == NULL) {
         perror("Unable to open file log.txt");
         return NULL;
@@ -123,6 +123,10 @@ logger_t* logger_init() {
     strftime(str, 50, "%d.%m.%Y at %H:%M:%S", curtime);
     fprintf(logfile, "#### Logging started [%s] ####\n", str);
 
+    #ifndef LOG_ON
+        fprintf(logfile, "Logging functionality is disabled\n");
+    #endif
+
     logger_t* logger = (logger_t*) malloc(sizeof(logger_t));
     logger->mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(logger->mutex, NULL);
@@ -132,20 +136,22 @@ logger_t* logger_init() {
 }
 
 void logger_printf(logger_t* logger, const char* format, ...) {
-    if(logger == NULL || logger->fd == NULL) {
-        return;
-    }
-    pthread_mutex_lock(logger->mutex);
-    struct tm* curtime = getcurtime();
-    char timestr[50];
-    strftime(timestr, 50, "%d.%m.%Y %H:%M:%S", curtime);
-    fprintf(logger->fd, "[%s] THREAD %lu: ", timestr, pthread_self());
-    va_list args;
-    va_start(args, format);
-    vfprintf(logger->fd, format, args);
-    va_end(args);
-    fprintf(logger->fd, "\n");
-    pthread_mutex_unlock(logger->mutex);
+    #ifdef LOG_ON
+        if(logger == NULL || logger->fd == NULL) {
+            return;
+        }
+        pthread_mutex_lock(logger->mutex);
+        struct tm* curtime = getcurtime();
+        char timestr[50];
+        strftime(timestr, 50, "%d.%m.%Y %H:%M:%S", curtime);
+        fprintf(logger->fd, "[%s] THREAD %lu: ", timestr, pthread_self());
+        va_list args;
+        va_start(args, format);
+        vfprintf(logger->fd, format, args);
+        va_end(args);
+        fprintf(logger->fd, "\n");
+        pthread_mutex_unlock(logger->mutex);
+    #endif
 }
 
 void logger_destroy(logger_t* logger) {

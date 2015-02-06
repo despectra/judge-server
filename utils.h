@@ -8,6 +8,8 @@
 #define max(a,b) (((a) > (b)) ? (a) : (b))
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 
+//#define LOG_ON
+
 typedef unsigned char uint8;
 typedef unsigned short uint16;
 typedef unsigned long uint32;

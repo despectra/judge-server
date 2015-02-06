@@ -78,9 +78,9 @@ void* thread_exec(void* args) {
         data_block* task_block = queue_pop(pool->tasks_queue);
         task* t = (task*) task_block->data;
         pthread_mutex_unlock(pool->mutex);
-        printf("%d: Running task, remaining %d\n", stamp, pool->tasks_queue->elems_count);
+        //printf("%d: Running task, remaining %d\n", stamp, pool->tasks_queue->elems_count);
         t->task_func(t->arg);
-        printf("%d: Done \n", stamp);
+        //printf("%d: Done \n", stamp);
         pthread_mutex_lock(pool->mutex_free);
         t->task_func = NULL;
         t->arg = NULL;

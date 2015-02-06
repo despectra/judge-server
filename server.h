@@ -26,7 +26,6 @@
 
 #define ERR_NOCOMPILER 1
 #define ERR_NOCLIENTS 2
-#define
 
 typedef struct {
     int socket;
