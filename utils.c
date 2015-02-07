@@ -1,6 +1,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include "utils.h"
 
 data_block read_string(char* data, uint32 length) {
@@ -42,25 +43,27 @@ queue* queue_init() {
     return q;
 }
 
-data_block* queue_pop(queue* q) {
+void* queue_pop(queue* q) {
     if(q == NULL) {
         return NULL;
     }
-    queue_elem* head = q->head;
-    if(head == NULL) {
+    queue_elem* elem = q->head;
+    if(elem == NULL) {
         return NULL;
     }
-    q->head = head->next;
+    void* value = elem->value;
+    q->head = elem->next;
     q->elems_count--;
-    return head->value;
+    free(elem);
+    return value;
 }
 
-void queue_push(queue* q, const data_block* in_block) {
+void queue_push(queue* q, void* value) {
     if(q == NULL) {
         return;
     }
     queue_elem* elem = (queue_elem*) malloc(sizeof(queue_elem));
-    elem->value = in_block;
+    elem->value = value;
     elem->next = NULL;
     if(q->elems_count == 0) {
         q->head = elem;
@@ -75,7 +78,7 @@ void queue_push(queue* q, const data_block* in_block) {
     q->elems_count++;
 }
 
-void queue_iterate(queue* q, void (*print_func)(data_block* block)) {
+void queue_iterate(queue* q, void (*print_func)(void*)) {
     if(q == NULL || q->elems_count == 0) {
         return;
     }
@@ -92,11 +95,7 @@ void queue_struct_free(queue* q) {
     }
     queue_elem* cur_elem = q->head;
     queue_elem* prev_elem;
-    data_block* block;
     while(cur_elem != NULL) {
-        block = cur_elem->value;
-        block_free(block);
-        free(cur_elem);
         prev_elem = cur_elem;
         cur_elem = cur_elem->next;
         free(prev_elem);
@@ -118,15 +117,14 @@ logger_t* logger_init() {
         return NULL;
     }
     struct tm* curtime = getcurtime();
-
     char str[50];
     strftime(str, 50, "%d.%m.%Y at %H:%M:%S", curtime);
-    fprintf(logfile, "#### Logging started [%s] ####\n", str);
+    fprintf(logfile, "----- Logging started [%s] -----\n", str);
 
-    #ifndef LOG_ON
-        fprintf(logfile, "Logging functionality is disabled\n");
-    #endif
-
+#ifndef LOG_ON
+    fprintf(logfile, "Logging functionality is disabled\n");
+#endif
+    fflush(logfile);
     logger_t* logger = (logger_t*) malloc(sizeof(logger_t));
     logger->mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(logger->mutex, NULL);
@@ -136,22 +134,23 @@ logger_t* logger_init() {
 }
 
 void logger_printf(logger_t* logger, const char* format, ...) {
-    #ifdef LOG_ON
-        if(logger == NULL || logger->fd == NULL) {
-            return;
-        }
-        pthread_mutex_lock(logger->mutex);
-        struct tm* curtime = getcurtime();
-        char timestr[50];
-        strftime(timestr, 50, "%d.%m.%Y %H:%M:%S", curtime);
-        fprintf(logger->fd, "[%s] THREAD %lu: ", timestr, pthread_self());
-        va_list args;
-        va_start(args, format);
-        vfprintf(logger->fd, format, args);
-        va_end(args);
-        fprintf(logger->fd, "\n");
-        pthread_mutex_unlock(logger->mutex);
-    #endif
+#ifdef LOG_ON
+    if(logger == NULL || logger->fd == NULL) {
+        return;
+    }
+    pthread_mutex_lock(logger->mutex);
+    struct tm* curtime = getcurtime();
+    char timestr[50];
+    strftime(timestr, 50, "%d.%m.%Y %H:%M:%S", curtime);
+    fprintf(logger->fd, "[%s] THREAD %lu: ", timestr, pthread_self());
+    va_list args;
+    va_start(args, format);
+    vfprintf(logger->fd, format, args);
+    va_end(args);
+    fprintf(logger->fd, "\n");
+    fflush(logger->fd);
+    pthread_mutex_unlock(logger->mutex);
+#endif
 }
 
 void logger_destroy(logger_t* logger) {
@@ -162,7 +161,7 @@ void logger_destroy(logger_t* logger) {
     struct tm* curtime = getcurtime();
     char str[50];
     strftime(str, 50, "%d.%m.%Y at %H:%M:%S", curtime);
-    fprintf(logger->fd, "><>< Logging ended [%s] ><><\n\n", str);
+    fprintf(logger->fd, "----- Logging ended [%s] -----\n\n", str);
     fclose(logger->fd);
     pthread_mutex_unlock(logger->mutex);
     pthread_mutex_destroy(logger->mutex);

@@ -1,8 +1,9 @@
 #include <stdbool.h>
+#include <stddef.h>
+#include <arpa/inet.h>
 
 #include "server.h"
 #include "solutions_db.h"
-#include "utils.h"
 
 const uint8 welcome_pkt[] = {0x00, 0x01, 0xFF};
 const uint8 welcome_pkt_len = 3;
@@ -22,8 +23,9 @@ pthread_mutex_t* db_mutex;
 
 void* client_loop(void* args);
 void process_solutions(client_t* client);
+void remove_client(uint32 client_id);
 void* poll_database(void* args);
-int push_solution(data_block* sln_block);
+int push_solution(solution_t* sln);
 client_t* client_create(endpoint_t* ep, uint32 id);
 compiler_t* compiler_create(uint16 id);
 void client_free(client_t* client);
@@ -63,13 +65,13 @@ void run_server(logger_t* in_logger) {
     pthread_mutex_init(compilers_map_mutex, NULL);
     pthread_mutex_init(clients_map_mutex, NULL);
     pthread_mutex_init(db_mutex, NULL);
-    //thread_pool_execute(pool, poll_database, NULL);
+    thread_pool_execute(pool, poll_database, NULL);
     while(server_running && (client_socket = accept(listener, (struct sockaddr*)&client_addr, &client_addrlen))) {
         printf("New client\n");
         logger_printf(logger, "New client connected");
-        endpoint_t*new_ep = (endpoint_t*) malloc(sizeof(endpoint_t));
+        endpoint_t* new_ep = (endpoint_t*) malloc(sizeof(endpoint_t));
         new_ep->socket = client_socket;
-        new_ep->addr = *((struct sockaddr*)&client_addr);
+        new_ep->addr = client_addr;
         new_ep->addrlen = client_addrlen;
         thread_pool_execute(pool, client_loop, new_ep);
     }
@@ -86,9 +88,6 @@ ssize_t transfer_all(int socket, bool do_send, char* data, socklen_t data_len) {
                 ? send(socket, cur_data_ptr, remaining_len, 0)
                 : recv(socket, cur_data_ptr, remaining_len, 0);
         if(transferred <= 0) {
-            if(transferred < 0) {
-                //TODO notify error
-            }
             return transferred;
         }
         cur_data_ptr += transferred;
@@ -110,6 +109,7 @@ void* client_loop(void* args) {
     int client_sock = ep->socket;
     setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, (char*) &recv_timeout, sizeof(recv_timeout));
 
+    //send handshake packet
     send_all(client_sock, (char*) &welcome_pkt[0], welcome_pkt_len);
 
     uint16 res_len;
@@ -120,6 +120,7 @@ void* client_loop(void* args) {
 	}
     res_len = ntohs(res_len);
 
+    //receive and parse client's compilers list
     char* res_pkt = (char*) malloc(res_len * sizeof(char));
     char* res_pkt_ptr = res_pkt;
     recvd = recv_all(client_sock, res_pkt, res_len);
@@ -147,10 +148,10 @@ void* client_loop(void* args) {
         res_pkt += sizeof(uint16);
     }
 
-    // TODO test all this stuff
+    //filling data structures
     pthread_mutex_lock(clients_map_mutex);
     uint32 new_client_id = last_client_id++;
-    logger_printf(logger, "New client id: %d", new_client_id);
+    logger_printf(logger, "New client id: %d; Endpoint %s:%d", new_client_id, inet_ntoa(ep->addr.sin_addr), ntohs(ep->addr.sin_port));
     logger_printf(logger, "Filling data structures for new client...");
     client_t* client = client_create(ep, new_client_id);
     HASH_ADD_INT(clients_map, id, client);
@@ -174,27 +175,27 @@ void* client_loop(void* args) {
     logger_printf(logger, "Client loop started");
     int err;
     while(server_running) {
-        // TODO ...test this too
         process_solutions(client);
 
         logger_printf(logger, "Waiting some data from client....");
-        printf("Waiting some data from client....\n");
         recvd = recv_all(client_sock, (char*) &res_len, sizeof(res_len));
         if(recvd <= 0) {
             err = errno;
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                //timeout
                 logger_printf(logger, "Timeout, loop again");
-                printf("Timeout, loop again\n");
-                continue; //timeout
+                continue;
             } else if(errno == ECONNRESET) {
                 //client disconnected unexpectedly
-                //TODO if there's a solutions in a queue, delegate them to another clients
-                //TODO delete all records about this client and decrease last_client_id
+                logger_printf(logger, "Client disconnected unexpectedly");
+                remove_client(new_client_id);
                 break;
+            } else {
+                logger_printf(logger, "Error while waiting data from client (%d)", err);
+                continue;
             }
         }
         logger_printf(logger, "Received something");
-        printf("Received something\n");
         //TODO implement response processing
     }
 
@@ -203,6 +204,87 @@ void* client_loop(void* args) {
     free(res_pkt_ptr);
     free(args);
     return NULL;
+}
+
+void process_solutions(client_t* client) {
+    logger_printf(logger, "Lets look at client's solutions queue");
+    pthread_mutex_lock(client->mutex);
+    if(client->solutions_queue->elems_count == 0) {
+        logger_printf(logger, "Here is nothing");
+        pthread_mutex_unlock(client->mutex);
+        return;
+    }
+    logger_printf(logger, "There is some solutions in a queue. Checking it..");
+    solution_t* sln = queue_pop(client->solutions_queue);
+    client->checking_solution = sln;
+    pthread_mutex_unlock(client->mutex);
+
+    size_t pkt_length = sizeof(char) + sizeof(sln->id) + sizeof(sln->compiler_id) + sizeof(sln->source_len) + sln->source_len;
+    char* pkt = (char*) malloc(pkt_length* sizeof(char));
+    char* pkt_ptr = pkt;
+    *pkt++ = OP_CHECK_SLN;
+    *((uint32*)pkt) = htonl(sln->id);
+    pkt += sizeof(sln->id);
+    *((uint32*)pkt) = htonl(sln->compiler_id);
+    pkt += sizeof(sln->compiler_id);
+    *((uint32*)pkt) = htonl(sln->source_len);
+    pkt += sizeof(sln->source_len);
+    memcpy(pkt, sln->source, sln->source_len);
+    send_all(client->endpoint->socket, pkt_ptr, (socklen_t) pkt_length);
+
+}
+
+void remove_client(uint32 id) {
+    logger_printf(logger, "Removing client %d from internal DB...", id);
+    client_t* client = NULL;
+    HASH_FIND_INT(clients_map, &id, client);
+    if(client == NULL) {
+        logger_printf(logger, "Client is already removed");
+        return;
+    }
+
+    logger_printf(logger, "Deleting client ids...");
+    //delete all records about this client from compilers map
+    pthread_mutex_lock(compilers_map_mutex);
+    compiler_t* compiler;
+    client_id_t* clid;
+    client_id_t* tmp_clid;
+    for(compiler = compilers_map; compiler != NULL; compiler = compiler->hh.next) {
+        pthread_mutex_lock(compiler->list_mutex);
+        HASH_ITER(hh, compiler->clients_list, clid, tmp_clid) {
+            if(clid->id == id) {
+                HASH_DEL(compiler->clients_list, clid);
+                free(clid);
+            }
+        }
+        pthread_mutex_unlock(compiler->list_mutex);
+    }
+    pthread_mutex_unlock(compilers_map_mutex);
+
+    //delete client record from clients map
+    pthread_mutex_lock(clients_map_mutex);
+    HASH_DEL(clients_map, client);
+    last_client_id--;
+    pthread_mutex_unlock(clients_map_mutex);
+
+    //delegate solutions to other clients
+    pthread_mutex_lock(client->mutex);
+    if(client->checking_solution != NULL) {
+        push_solution(client->checking_solution);
+        client->checking_solution = NULL;
+    }
+
+    if(client->solutions_queue->elems_count > 0) {
+        solution_t* pending_sln = NULL;
+        while((pending_sln = (solution_t*) queue_pop(client->solutions_queue)) != NULL) {
+            push_solution(pending_sln);
+        }
+    }
+    queue_struct_free(client->solutions_queue);
+    client->endpoint = NULL;
+    pthread_mutex_unlock(client->mutex);
+    pthread_mutex_destroy(client->mutex);
+    free(client);
 }
 
 client_t* client_create(endpoint_t* ep, uint32 id) {
@@ -224,85 +306,51 @@ compiler_t* compiler_create(uint16 id) {
     return c;
 }
 
-void process_solutions(client_t* client) {
-    logger_printf(logger, "Lets look at client's solutions queue");
-    pthread_mutex_lock(client->mutex);
-    if(client->solutions_queue->elems_count == 0) {
-        logger_printf(logger, "Here is nothing");
-        pthread_mutex_unlock(client->mutex);
-        return;
-    }
-    logger_printf(logger, "There is some solutions in a queue. Checking it..");
-    data_block* sln_block = queue_pop(client->solutions_queue);
-    client->checking_solution = (solution*) sln_block->data;
-    pthread_mutex_unlock(client->mutex);
-
-    solution* sln = client->checking_solution;
-    uint32 pkt_length = sizeof(char) + sizeof(sln->id) + sizeof(uint32) + sln->source_len;
-    char* pkt = (char*) malloc(pkt_length* sizeof(char));
-    char* pkt_ptr = pkt;
-    *pkt++ = OP_CHECK_SLN;
-    sln->id = htonl(sln->id);
-    sln->source_len = htonl(sln->source_len);
-    sln->compiler_id = htonl(sln->compiler_id);
-
-    *((uint32*)pkt) = sln->id;
-    pkt += sizeof(sln->id);
-    *((uint32*)pkt) = sln->source_len;
-    pkt += sizeof(sln->source_len);
-    memcpy(pkt, &sln->compiler_id, sizeof(sln->compiler_id));
-    pkt += sizeof(sln->compiler_id);
-    memcpy(pkt, sln->source, (size_t) sln->source_len);
-    send_all(client->endpoint->socket, pkt_ptr, (socklen_t) pkt_length);
-
-    block_free(sln_block);
-}
-
 void* poll_database(void* args) {
     solutions_init_db(logger);
-	solution* new_solutions = NULL;
-    solution* cur_solution = NULL;
-	uint64* count = NULL;
+	solution_t* new_solutions = NULL;
+    solution_t* cur_solution = NULL;
+	uint64 count;
 
     logger_printf(logger, "Database polling loop started");
     while(server_running) {
         sleep(5);
         pthread_mutex_lock(db_mutex);
-        int result = solutions_extract_new(new_solutions, count);
+        logger_printf(logger, "Let's look into MySQL DB");
+        int result = solutions_extract_new(&new_solutions, &count);
         pthread_mutex_unlock(db_mutex);
 
         if(result != 0) {
 			logger_printf(logger, "Error while extracting solutions from DB");
 			continue;
 		}
-        if(*count > 0) {
-            logger_printf(logger, "%d new solution(s) was submitted", *count);
+        if(count > 0) {
+            logger_printf(logger, "%d new solution_t(s) was submitted", count);
         }
-		for(uint64 i = 0; i < *count; i++) {
-            cur_solution = new_solutions + i * sizeof(solution);
-            data_block* solution_block = block_init(cur_solution, sizeof(cur_solution));
-            push_solution(solution_block);
+		for(uint64 i = 0; i < count; i++) {
+            cur_solution = &new_solutions[i];
+            push_solution(cur_solution);
         }
     }
     solutions_close_db();
     return NULL;
 }
 
-int push_solution(data_block* sln_block) {
-    solution* sln = (solution*) sln_block->data;
+int push_solution(solution_t* sln) {
     uint32 compiler_id = sln->compiler_id;
-    logger_printf(logger, "SLN %d: Choosing client for checking  solution on compiler %d", sln->id, compiler_id);
+    logger_printf(logger, "SLN %d: Choosing client for checking  solution_t on compiler %d", sln->id, compiler_id);
     compiler_t* compiler = NULL;
     HASH_FIND_INT(compilers_map, &compiler_id, compiler);
     if(compiler == NULL) {
         logger_printf(logger, "SLN %d: Solution can't be checked, no compiler", sln->id);
-        //TODO report error via DB row
+        solution_post_result(sln->id, 0, "FAIL no compiler");
         return ERR_NOCOMPILER;
     }
 
     pthread_mutex_lock(clients_map_mutex);
     pthread_mutex_lock(compiler->list_mutex);
-    uint32 min_loading = 999;
+    uint32 min_loading = INT32_MAX;
+    uint32 cur_loading;
     client_id_t* c;
     client_t* cur_client;
     client_t* most_free_client = NULL;
@@ -315,23 +363,21 @@ int push_solution(data_block* sln_block) {
             continue;
         }
         pthread_mutex_lock(cur_client->mutex);
-        if(c == compiler->clients_list) {
-            min_loading = cur_client->solutions_queue->elems_count;
-        }
-        if(cur_client->solutions_queue->elems_count == 0 && cur_client->checking_solution == NULL) {
+        cur_loading = cur_client->solutions_queue->elems_count + (cur_client->checking_solution != NULL) ? 1 : 0;
+        pthread_mutex_unlock(cur_client->mutex);
+        if(cur_loading == 0) {
             most_free_client = cur_client;
-            pthread_mutex_unlock(cur_client->mutex);
             break;
         }
-        if(cur_client->solutions_queue->elems_count < min_loading) {
-            min_loading = cur_client->solutions_queue->elems_count;
+        if(cur_loading <= min_loading) {
+            min_loading = cur_loading;
             most_free_client = cur_client;
         }
-        pthread_mutex_unlock(cur_client->mutex);
     }
     if(most_free_client == NULL) {
         logger_printf(logger, "SLN %d: Most free client-checker wasn't found", sln->id);
-        //almost impossible situation BUT ANYWAY TODO find another client
+        //TODO find another client
+        solution_post_result(sln->id, 0, "FAIL syserr");
         pthread_mutex_unlock(compiler->list_mutex);
         pthread_mutex_unlock(clients_map_mutex);
         return ERR_NOCLIENTS;
@@ -339,9 +385,9 @@ int push_solution(data_block* sln_block) {
     pthread_mutex_unlock(compiler->list_mutex);
     pthread_mutex_unlock(clients_map_mutex);
 
-    logger_printf(logger, "SLN %d: Client found, pushing solution to it's queue", sln->id);
+    logger_printf(logger, "SLN %d: Client found (%d), pushing solution to it's queue", sln->id, most_free_client->id);
     pthread_mutex_lock(most_free_client->mutex);
-    queue_push(most_free_client->solutions_queue, sln_block);
+    queue_push(most_free_client->solutions_queue, sln);
     pthread_mutex_unlock(most_free_client->mutex);
     return 0;
 }

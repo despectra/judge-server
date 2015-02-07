@@ -12,6 +12,15 @@
 
 #define FIELDS_COUNT 9
 
+#define SERVER "localhost"
+#define USER "judge"
+#define PASSWORD "12345"
+#define DATABASE "judgeweb"
+
+#define ERR_DB 1
+#define ERR_SCHEMA 2
+#define ERR_ARGS 3
+
 typedef struct {
     uint32 id;
     uint32 user_id;
@@ -24,11 +33,12 @@ typedef struct {
     bool accepted;
     char* response;
     uint8 response_len;
-} solution;
+} solution_t;
 
 int solutions_init_db(logger_t* logger);
 void solutions_close_db();
-int solutions_extract_new(solution* sln_arr, uint64* sln_arr_len);
-void solution_free(solution* sln);
+int solutions_extract_new(solution_t** sln_arr_ptr, uint64* sln_arr_len);
+int solution_post_result(uint32 sln_id, int8 accepted, char* response_text);
+void solution_free(solution_t* sln);
 
 #endif // SOLUTIONS_DB_H

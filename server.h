@@ -29,7 +29,7 @@
 
 typedef struct {
     int socket;
-    struct sockaddr addr;
+    struct sockaddr_in addr;
     socklen_t addrlen;
 } endpoint_t;
 
@@ -49,7 +49,7 @@ typedef struct {
     uint32 id;
     endpoint_t* endpoint;
     queue* solutions_queue;
-    solution* checking_solution;
+    solution_t* checking_solution;
     pthread_mutex_t* mutex;
     UT_hash_handle hh;
 } client_t;

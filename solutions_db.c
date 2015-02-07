@@ -2,45 +2,50 @@
 
 MYSQL* conn;
 
-const char* server = "localhost";
-const char* user = "contestphp";
-const char* password = "c0nt3st";
-const char* database = "contestphp";
-
 logger_t* logger;
 
-int solutions_init_db(logger_t* in_logger) {
-    conn = mysql_init(NULL);
-    if(!mysql_real_connect(conn, server, user, password, database, 0, NULL, 0)) {
+int query(logger_t* logger, const char* sql) {
+    if(mysql_query(conn, sql)) {
         logger_printf(logger, "MYSQL %s", mysql_error(conn));
-        return 1;
+        return ERR_DB;
     }
     return 0;
 }
 
-int solutions_extract_new(solution* sln_arr, uint64* sln_arr_len) {
-    if (mysql_query(conn, "select * from solutions where checking = 0")) {
-        logger_printf(logger, "MYSQL %s\n", mysql_error(conn));
-        return 1;
+int solutions_init_db(logger_t* in_logger) {
+    conn = mysql_init(NULL);
+    logger = in_logger;
+    if(!mysql_real_connect(conn, SERVER, USER, PASSWORD, DATABASE, 0, NULL, 0)) {
+        logger_printf(logger, "MYSQL %s", mysql_error(conn));
+        return ERR_DB;
+    }
+    return 0;
+}
+
+int solutions_extract_new(solution_t** sln_arr_ptr, uint64* sln_arr_len) {
+    if(sln_arr_len == NULL) {
+        return ERR_ARGS;
+    }
+
+    if (query(logger, "select * from solutions where checking = 0")) {
+        return ERR_DB;
     }
     MYSQL_ROW row;
-    MYSQL_RES* result = mysql_use_result(conn);
+    MYSQL_RES* result = mysql_store_result(conn);
     if(mysql_field_count(conn) != FIELDS_COUNT) {
-        return 2;
+        return ERR_SCHEMA;
     }
 
-    if(sln_arr_len == NULL) {
-        sln_arr_len = (uint64*) malloc(sizeof(uint64));
+    *sln_arr_len = mysql_num_rows(result);
+    if(*sln_arr_len == 0) {
+        return 0;
     }
 
-    *sln_arr_len = (uint64) mysql_num_rows(result);
-    sln_arr = (solution*) malloc((*sln_arr_len) * sizeof(solution));
-    if(sln_arr == NULL) {
-        return 3;
-    }
-    
-    solution* cur_ptr = sln_arr;
-    uint32* rows_lengths;
+    *sln_arr_ptr = (solution_t*) malloc((*sln_arr_len) * sizeof(solution_t));
+    solution_t* cur_ptr = *sln_arr_ptr;
+    uint64* rows_lengths;
+
+    char upd_query[100];
     while((row = mysql_fetch_row(result)) != NULL) {
         rows_lengths = mysql_fetch_lengths(result);
         cur_ptr->id = atoi(row[0]);
@@ -56,10 +61,24 @@ int solutions_extract_new(solution* sln_arr, uint64* sln_arr_len) {
         cur_ptr->response_len = rows_lengths[8];
         cur_ptr->response = (char*) malloc(cur_ptr->response_len * sizeof(char));
         memcpy(cur_ptr->response, row[8], cur_ptr->response_len);
-        cur_ptr += sizeof(solution);
+        cur_ptr += sizeof(solution_t);
     }
-    
+
     mysql_free_result(result);
+    if(query(logger, "start transaction")) {
+        return ERR_DB;
+    }
+    for(uint64 i = 0; i < *sln_arr_len; i++) {
+        snprintf(&upd_query[0], 100, "update solutions set checking = 1 where id = %u", (*sln_arr_ptr)[i].id);
+        if(query(logger, &upd_query[0])) {
+            query(logger, "rollback");
+            return ERR_DB;
+        }
+    }
+    if(query(logger, "commit")) {
+        return ERR_DB;
+    }
+
     return 0;
 }
 
@@ -69,11 +88,17 @@ void solutions_close_db() {
     mysql_close(conn);
 }
 
-void solution_free(solution* sln) {
+void solution_free(solution_t* sln) {
 	if(sln == NULL) {
 		return;
 	}
 	free(sln->source);
 	free(sln->response);
 	free(sln);
+}
+
+int solution_post_result(uint32 sln_id, int8 accepted, char* response_text) {
+    char sql[100];
+    snprintf(&sql[0], 100, "update solutions set checking = 2, ac = %u, response = '%s' where id = %u", accepted, response_text, sln_id);
+    return query(logger, &sql[0]);
 }

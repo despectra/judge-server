@@ -8,16 +8,16 @@
 #define max(a,b) (((a) > (b)) ? (a) : (b))
 #define min(a,b) (((a) < (b)) ? (a) : (b))
 
-//#define LOG_ON
+#define LOG_ON
 
-typedef unsigned char uint8;
-typedef unsigned short uint16;
-typedef unsigned long uint32;
-typedef unsigned long long uint64;
-typedef char int8;
-typedef short int16;
-typedef long int32;
-typedef long long int64;
+typedef __uint8_t uint8;
+typedef __uint16_t uint16;
+typedef __uint32_t uint32;
+typedef __uint64_t uint64;
+typedef __int8_t int8;
+typedef __int16_t int16;
+typedef __int32_t int32;
+typedef __int64_t int64;
 
 /*
  * Generic data block with size
@@ -42,7 +42,7 @@ data_block read_string(char* data, uint32 length);
 */
 
 typedef struct q_elem {
-    data_block* value;
+    void* value;
     struct q_elem* next;
 } queue_elem;
 
@@ -57,19 +57,19 @@ queue* queue_init();
 /*
 * returns the head element of the queue with removing of this element
 */
-data_block* queue_pop(queue* q);
+void* queue_pop(queue* q);
 
 /*
 * pushes the data_block element in the queue
 * in_block is not being copied while pushing so you should always hold pointer to it
 */
-void queue_push(queue* q, const data_block* in_block);
+void queue_push(queue* q, void* value);
 
 /*
 * iterates over all elements in a queue
 * for each element print_func is being invoked
 */
-void queue_iterate(queue* q, void (*print_func)(data_block* block));
+void queue_iterate(queue* q, void (*print_func)(void*));
 
 /*
 * free the queue structure without free()ing data blocks itself
