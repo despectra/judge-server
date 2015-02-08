@@ -23,6 +23,7 @@ pthread_mutex_t* db_mutex;
 
 void* client_loop(void* args);
 void process_solutions(client_t* client);
+void post_result(uint32 solution_id, uint8 result_code, uint8 test_number);
 void remove_client(uint32 client_id);
 void* poll_database(void* args);
 int push_solution(solution_t* sln);
@@ -196,7 +197,37 @@ void* client_loop(void* args) {
             }
         }
         logger_printf(logger, "Received something");
-        //TODO implement response processing
+        res_len = ntohs(res_len);
+        char* pkt = malloc(res_len * sizeof(char));
+        char* pkt_ptr = pkt;
+        recvd = recv_all(client_sock, pkt, res_len);
+        if(recvd != res_len) {
+            logger_printf(logger, "Broken packet");
+            continue;
+        }
+        op_code = (uint8)*pkt++;
+        uint32 solution_id;
+        uint8 result_code;
+        uint8 test_number;
+        solution_t* checked_sln;
+        switch(op_code) {
+            case OP_RESULT:
+                solution_id = ntohl(*((uint32*)pkt));
+                pkt += sizeof(uint32);
+                result_code = (uint8)*pkt++;
+                test_number = (uint8)*pkt;
+
+                post_result(solution_id, result_code, test_number);
+
+                pthread_mutex_lock(client->mutex);
+                checked_sln = client->checking_solution;
+                client->checking_solution = NULL;
+                pthread_mutex_unlock(client->mutex);
+                solution_free(checked_sln);
+                break;
+        }
+
+        free(pkt_ptr);
     }
 
     close(client_sock);
@@ -220,8 +251,10 @@ void process_solutions(client_t* client) {
     pthread_mutex_unlock(client->mutex);
 
     size_t pkt_length = sizeof(char) + sizeof(sln->id) + sizeof(sln->compiler_id) + sizeof(sln->source_len) + sln->source_len;
-    char* pkt = (char*) malloc(pkt_length* sizeof(char));
+    char* pkt = (char*) malloc(pkt_length* sizeof(char) + sizeof(uint16));
     char* pkt_ptr = pkt;
+    *((uint16*)pkt) = htons(pkt_length);
+    pkt += sizeof(uint16);
     *pkt++ = OP_CHECK_SLN;
     *((uint32*)pkt) = htonl(sln->id);
     pkt += sizeof(sln->id);
@@ -230,8 +263,47 @@ void process_solutions(client_t* client) {
     *((uint32*)pkt) = htonl(sln->source_len);
     pkt += sizeof(sln->source_len);
     memcpy(pkt, sln->source, sln->source_len);
-    send_all(client->endpoint->socket, pkt_ptr, (socklen_t) pkt_length);
+    send_all(client->endpoint->socket, pkt_ptr, (socklen_t) pkt_length + sizeof(uint16));
 
+}
+
+void post_result(uint32 solution_id, uint8 result_code, uint8 test_number) {
+    char str[10];
+    pthread_mutex_lock(db_mutex);
+    switch(result_code) {
+        case 0:
+            solution_post_result(solution_id, 1, "AC");
+            break;
+        case 1:
+            snprintf(str, 10, "WA %u", test_number);
+            solution_post_result(solution_id, 0, str);
+            break;
+        case 2:
+            snprintf(str, 10, "MLE %u", test_number);
+            solution_post_result(solution_id, 0, str);
+            break;
+        case 3:
+            snprintf(str, 10, "TLE %u", test_number);
+            solution_post_result(solution_id, 0, str);
+            break;
+        case 4:
+            snprintf(str, 10, "PE %u", test_number);
+            solution_post_result(solution_id, 0, str);
+            break;
+        case 5:
+            snprintf(str, 10, "RE %u", test_number);
+            solution_post_result(solution_id, 0, str);
+            break;
+        case 6:
+            solution_post_result(solution_id, 0, "FL");
+            break;
+        case 7:
+            solution_post_result(solution_id, 0, "CE");
+            break;
+        default:
+            break;
+    }
+    pthread_mutex_unlock(db_mutex);
 }
 
 void remove_client(uint32 id) {
@@ -280,11 +352,8 @@ void remove_client(uint32 id) {
             push_solution(pending_sln);
         }
     }
-    queue_struct_free(client->solutions_queue);
-    client->endpoint = NULL;
     pthread_mutex_unlock(client->mutex);
-    pthread_mutex_destroy(client->mutex);
-    free(client);
+    client_free(client);
 }
 
 client_t* client_create(endpoint_t* ep, uint32 id) {
@@ -306,8 +375,20 @@ compiler_t* compiler_create(uint16 id) {
     return c;
 }
 
+void client_free(client_t* client) {
+    if(client == NULL) {
+        return;
+    }
+    queue_struct_free(client->solutions_queue);
+    client->endpoint = NULL;
+    pthread_mutex_destroy(client->mutex);
+    free(client);
+}
+
 void* poll_database(void* args) {
-    solutions_init_db(logger);
+    if(solutions_init_db(logger) == ERR_DB) {
+        return NULL;
+    }
 	solution_t* new_solutions = NULL;
     solution_t* cur_solution = NULL;
 	uint64 count;

@@ -112,6 +112,7 @@ struct tm* getcurtime() {
 logger_t* logger_init() {
     const char* fname = "log.txt";
     FILE* logfile = fopen(fname, "w");
+    freopen("log.txt", "w", stderr);
     if(logfile == NULL) {
         perror("Unable to open file log.txt");
         return NULL;
