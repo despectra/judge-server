@@ -76,6 +76,7 @@ void run_server(logger_t* in_logger) {
         new_ep->addrlen = client_addrlen;
         thread_pool_execute(pool, client_loop, new_ep);
     }
+    //TODO implement cleanup
     pthread_mutex_destroy(db_mutex);
     destroy_thread_pool(pool);
 }
