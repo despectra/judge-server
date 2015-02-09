@@ -1,8 +1,10 @@
+#include <assert.h>
 #include "solutions_db.h"
 
 MYSQL* conn;
 
 logger_t* logger;
+db_config* config;
 
 int query(logger_t* logger, const char* sql) {
     if(mysql_query(conn, sql)) {
@@ -12,10 +14,15 @@ int query(logger_t* logger, const char* sql) {
     return 0;
 }
 
+void solutions_configure_db(db_config* conf) {
+    config = conf;
+}
+
 int solutions_init_db(logger_t* in_logger) {
+    assert(config != NULL);
     conn = mysql_init(NULL);
     logger = in_logger;
-    if(!mysql_real_connect(conn, SERVER, USER, PASSWORD, DATABASE, 0, NULL, 0)) {
+    if(!mysql_real_connect(conn, config->host, config->user, config->password, config->db_name, 0, NULL, 0)) {
         logger_printf(logger, "MYSQL %s", mysql_error(conn));
         return ERR_DB;
     }
@@ -86,6 +93,7 @@ int solutions_extract_new(solution_t** sln_arr_ptr, uint64* sln_arr_len) {
 
 void solutions_close_db() {
     logger = NULL;
+    config = NULL;
     mysql_close(conn);
 }
 

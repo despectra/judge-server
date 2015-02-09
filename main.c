@@ -1,11 +1,9 @@
 #include "server.h"
 
-#include <signal.h>
 #include <sys/stat.h>
+#include <pwd.h>
 
 logger_t* logger;
-
-void cleanup(int);
 
 void daemon_init(const char* dir) {
     pid_t pid;
@@ -34,19 +32,52 @@ void daemon_init(const char* dir) {
     }
 }
 
+db_config* read_db_config() {
+    FILE* cfg_file;
+    struct passwd* pw = getpwuid(getuid());
+    const char* homedir = pw->pw_dir;
+    char cfg_fname[100];
+    snprintf(cfg_fname, 100, "%s/.judge-server/db.conf", homedir);
+    if((cfg_file = fopen(cfg_fname, "r")) == NULL) {
+        printf("Error! Config file not found: %s. Create it manually and fill with MySQL DB credentials\n", cfg_fname);
+        exit(EXIT_FAILURE);
+    }
+    long size;
+    fseek(cfg_file, 0L, SEEK_END);
+    size = ftell(cfg_file);
+    fseek(cfg_file, 0L, SEEK_SET);
+
+    char* cfg_buf = malloc(size);
+    fread(cfg_buf, 1, size, cfg_file);
+    fclose(cfg_file);
+
+    db_config* conf = malloc(sizeof(db_config));
+    conf->host = strtok(cfg_buf, "\n");
+    conf->user = strtok(NULL, "\n");
+    conf->password = strtok(NULL, "\n");
+    conf->db_name = strtok(NULL, "\n");
+
+    return conf;
+}
+
 int main(int argc, char* argv[]) {
+
+    db_config* conf = read_db_config();
+    solutions_configure_db(conf);
+
     const char* dirname;
     if(argc == 2) {
         dirname = argv[1];
     } else {
-        dirname = "~";
+        struct passwd* pw = getpwuid(getuid());
+        dirname = pw->pw_dir;
     }
     daemon_init(dirname);
     logger = logger_init();
     run_server(logger);
-    return 0;
-}
 
-void cleanup(int s) {
+    free(conf->host);
+    free(conf);
     logger_destroy(logger);
+    return 0;
 }

@@ -35,6 +35,14 @@ typedef struct {
     uint8 response_len;
 } solution_t;
 
+typedef struct {
+    const char* host;
+    const char* user;
+    const char* password;
+    const char* db_name;
+} db_config;
+
+void solutions_configure_db(db_config* conf);
 int solutions_init_db(logger_t* logger);
 void solutions_close_db();
 int solutions_extract_new(solution_t** sln_arr_ptr, uint64* sln_arr_len);
