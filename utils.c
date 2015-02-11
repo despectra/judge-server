@@ -189,6 +189,7 @@ void logger_destroy(logger_t* logger) {
     char str[50];
     strftime(str, 50, "%d.%m.%Y at %H:%M:%S", curtime);
     fprintf(logger->fd, "----- Logging ended [%s] -----\n\n", str);
+    fflush(logger->fd);
     fclose(logger->fd);
     pthread_mutex_unlock(logger->mutex);
     pthread_mutex_destroy(logger->mutex);

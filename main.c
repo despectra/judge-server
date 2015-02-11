@@ -3,8 +3,6 @@
 #include <sys/stat.h>
 #include <pwd.h>
 
-logger_t* logger;
-
 void daemon_init(const char* dir) {
     pid_t pid;
     pid = fork();
@@ -75,7 +73,9 @@ int main(int argc, char* argv[]) {
     if(argc == 2) {
         daemon_init(dirname);
     }
+    logger_t* logger;
     logger = logger_init();
+
     run_server(logger);
 
     free(conf->host);

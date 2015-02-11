@@ -41,7 +41,7 @@ void destroy_thread_pool(thread_pool* pool) {
     pthread_mutex_destroy(pool->mutex_free);
     pthread_cond_destroy(pool->cond);
 
-    queue_iterate(pool->tasks_queue, block_free);
+    queue_iterate(pool->tasks_queue, free);
     queue_struct_free(pool->tasks_queue);
     free(pool);
 }
@@ -52,20 +52,13 @@ void thread_pool_execute(thread_pool* pool, void* (*func)(void*), void* arg) {
     t->arg = arg;
     
     pthread_mutex_lock(pool->mutex);
-
-    data_block* task_block = block_init(t, sizeof(*t));
-    queue_push(pool->tasks_queue, task_block);
-    
+    queue_push(pool->tasks_queue, t);
     pthread_cond_signal(pool->cond);
     pthread_mutex_unlock(pool->mutex);
 }
 
 void* thread_exec(void* args) {
     thread_pool* pool = (thread_pool*) args;
-    struct timeval timestamp;
-    gettimeofday(&timestamp, NULL);
-    long stamp = timestamp.tv_usec;
-    stamp = ((stamp / 100) % 10) * 100 + ((stamp / 10) % 10) * 10 + (stamp % 10);
     while(!pool->cancelled) {
         pthread_mutex_lock(pool->mutex);
         while(!pool->cancelled && pool->tasks_queue->elems_count == 0) {
@@ -75,16 +68,13 @@ void* thread_exec(void* args) {
             pthread_mutex_unlock(pool->mutex);
             return NULL;
         }
-        data_block* task_block = queue_pop(pool->tasks_queue);
-        task* t = (task*) task_block->data;
+        task* t = queue_pop(pool->tasks_queue);
         pthread_mutex_unlock(pool->mutex);
-        //printf("%d: Running task, remaining %d\n", stamp, pool->tasks_queue->elems_count);
         t->task_func(t->arg);
-        //printf("%d: Done \n", stamp);
         pthread_mutex_lock(pool->mutex_free);
         t->task_func = NULL;
         t->arg = NULL;
-        block_free(task_block);
+        free(t);
         pthread_mutex_unlock(pool->mutex_free);
     }
     return NULL;

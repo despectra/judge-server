@@ -20,6 +20,7 @@
 #define VERSION "0.1.1"
 
 #define PORT 42016
+#define LOCAL_CONTROL_PORT 50000
 
 #define THREAD_POOL_CAPACITY 20
 
