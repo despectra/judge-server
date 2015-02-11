@@ -72,7 +72,9 @@ int main(int argc, char* argv[]) {
         struct passwd* pw = getpwuid(getuid());
         dirname = pw->pw_dir;
     }
-    daemon_init(dirname);
+    if(argc == 2) {
+        daemon_init(dirname);
+    }
     logger = logger_init();
     run_server(logger);
 

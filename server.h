@@ -17,6 +17,8 @@
 #include "uthash.h"
 #include "utlist.h"
 
+#define VERSION "0.1.1"
+
 #define PORT 42016
 
 #define THREAD_POOL_CAPACITY 20
@@ -28,11 +30,14 @@
 #define ERR_NOCOMPILER 1
 #define ERR_NOCLIENTS 2
 
-typedef struct {
-    int socket;
-    struct sockaddr_in addr;
-    socklen_t addrlen;
-} endpoint_t;
+#define CLI_SENDTIMEOUT -3
+#define CLI_CONNERROR -4
+
+#define RECV_TIMEOUT_SEC 5
+#define SEND_TIMEOUT_SEC 6
+
+#define RECV_MAX_TIMEOUT RECV_TIMEOUT_SEC * 5
+#define SEND_MAX_TIMEOUT SEND_TIMEOUT_SEC * 3
 
 typedef struct {
     uint32 id;
@@ -51,6 +56,8 @@ typedef struct {
     endpoint_t* endpoint;
     queue* solutions_queue;
     solution_t* checking_solution;
+    uint16 last_recv_delay;
+    uint16 last_send_delay;
     pthread_mutex_t* mutex;
     UT_hash_handle hh;
 } client_t;

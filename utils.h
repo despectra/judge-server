@@ -2,8 +2,10 @@
 #define UTILS_H
 
 #include <stdlib.h>
-#include <bits/pthreadtypes.h>
 #include <stdio.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <pthread.h>
 
 #define max(a,b) (((a) > (b)) ? (a) : (b))
 #define min(a,b) (((a) < (b)) ? (a) : (b))
@@ -20,7 +22,27 @@ typedef __int32_t int32;
 typedef __int64_t int64;
 
 /*
- * Generic data block with size
+ *  Useful functions, types, structs for networking
+ */
+
+typedef struct {
+    int socket;
+    struct sockaddr_in addr;
+    socklen_t addrlen;
+} endpoint_t;
+
+/*
+    Try to send a pack of data of size=@data_len
+ */
+ssize_t send_all(int socket, char* data, socklen_t data_len);
+
+/*
+    Try to receive a pack of data of size=@data_len
+ */
+ssize_t recv_all(int socket, char* data, socklen_t data_len);
+
+/*
+ *  Generic data block with size
  */
 
 typedef struct {
@@ -29,7 +51,7 @@ typedef struct {
 } data_block;
 
 /*
-* initializes generic data block with size 'length'
+*   initializes generic data block with size 'length'
 */
 data_block* block_init(void* data, uint32 length);
 
@@ -38,7 +60,7 @@ void block_free(data_block* block);
 data_block read_string(char* data, uint32 length);
 
 /*
-* Simple queue
+*   Simple queue
 */
 
 typedef struct q_elem {
@@ -55,30 +77,30 @@ typedef struct {
 queue* queue_init();
 
 /*
-* returns the head element of the queue with removing of this element
+*   returns the head element of the queue with removing of this element
 */
 void* queue_pop(queue* q);
 
 /*
-* pushes the data_block element in the queue
-* in_block is not being copied while pushing so you should always hold pointer to it
+*   pushes the data_block element in the queue
+*   @value is not being copied while pushing so you should always hold pointer to it
 */
 void queue_push(queue* q, void* value);
 
 /*
-* iterates over all elements in a queue
-* for each element print_func is being invoked
+*   iterates over all elements in a queue
+*   for each element @print_func is being invoked
 */
 void queue_iterate(queue* q, void (*print_func)(void*));
 
 /*
-* free the queue structure without free()ing data blocks itself
-* must be called only after each data_block in queue has been free()d
+*   free the queue structure without free()ing data blocks itself
+*   must be called only after each data_block in queue has been free()d
 */
 void queue_struct_free(queue* q);
 
 /*
- * Simple file logger (thread safe)
+ *  Simple thread-safe file logger
  */
 
 typedef struct {
@@ -88,17 +110,17 @@ typedef struct {
 } logger_t;
 
 /*
-Creates new instance of file logger
+    Creates new instance of file logger
  */
 logger_t* logger_init();
 
 /*
-Writes formatted string to log
+    Writes formatted string to log
  */
 void logger_printf(logger_t* logger, const char* format, ...);
 
 /*
- Free resources associated with this logger
+    Free resources associated with this @logger
  */
 void logger_destroy(logger_t* logger);
 

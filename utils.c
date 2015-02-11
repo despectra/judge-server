@@ -4,6 +4,32 @@
 #include <stdbool.h>
 #include "utils.h"
 
+ssize_t transfer_all(int socket, bool do_send, char* data, socklen_t data_len) {
+    ssize_t transferred = 0;
+    char* cur_data_ptr = data;
+    socklen_t remaining_len = data_len;
+    while(remaining_len > 0) {
+        transferred = do_send
+                ? send(socket, cur_data_ptr, remaining_len, 0)
+                : recv(socket, cur_data_ptr, remaining_len, 0);
+        if(transferred <= 0) {
+            return transferred;
+        }
+        cur_data_ptr += transferred;
+        remaining_len -= transferred;
+    }
+    return cur_data_ptr - data;
+}
+
+ssize_t send_all(int socket, char* data, socklen_t data_len) {
+    return transfer_all(socket, true, data, data_len);
+}
+
+ssize_t recv_all(int socket, char* data, socklen_t data_len) {
+    return transfer_all(socket, false, data, data_len);
+}
+
+
 data_block read_string(char* data, uint32 length) {
     data_block block;
     if(length < 4) {
