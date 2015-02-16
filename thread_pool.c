@@ -6,17 +6,17 @@
 void* thread_exec(void* args);
 
 thread_pool* init_thread_pool(int threads_num) {
-    thread_pool* pool = (thread_pool*) malloc(sizeof(thread_pool));
+    thread_pool* pool = malloc(sizeof(thread_pool));
     pool->threads_num = threads_num;
     pool->cancelled = false;
-    pool->mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
-    pool->mutex_free = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
-    pool->cond = (pthread_cond_t*) malloc(sizeof(pthread_cond_t));
+    pool->mutex = malloc(sizeof(pthread_mutex_t));
+    pool->mutex_free = malloc(sizeof(pthread_mutex_t));
+    pool->cond = malloc(sizeof(pthread_cond_t));
     pthread_mutex_init(pool->mutex, NULL);
     pthread_mutex_init(pool->mutex_free, NULL);
     pthread_cond_init(pool->cond, NULL);
     pool->tasks_queue = queue_init();
-    pool->threads = (pthread_t*) malloc(threads_num * sizeof(pthread_t));
+    pool->threads = malloc(threads_num * sizeof(pthread_t));
 
     pthread_t* thread;
     for(int i = 0; i < threads_num; i++) {
@@ -47,7 +47,7 @@ void destroy_thread_pool(thread_pool* pool) {
 }
 
 void thread_pool_execute(thread_pool* pool, void* (*func)(void*), void* arg) {
-    task* t = (task*) malloc(sizeof(task));
+    task* t = malloc(sizeof(task));
     t->task_func = func;
     t->arg = arg;
     

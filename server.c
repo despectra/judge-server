@@ -58,9 +58,9 @@ void run_server(logger_t* in_logger) {
     logger_printf(logger, "Judge Server v%s is running. Waiting for incoming connections", VERSION);
 
     thread_pool* pool = init_thread_pool(THREAD_POOL_CAPACITY);
-    compilers_map_mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
-    clients_map_mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
-    db_mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+    compilers_map_mutex = malloc(sizeof(pthread_mutex_t));
+    clients_map_mutex = malloc(sizeof(pthread_mutex_t));
+    db_mutex = malloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(compilers_map_mutex, NULL);
     pthread_mutex_init(clients_map_mutex, NULL);
     pthread_mutex_init(db_mutex, NULL);
@@ -73,7 +73,7 @@ void run_server(logger_t* in_logger) {
             break;
         }
         logger_printf(logger, "New client connected. More info below");
-        endpoint_t* new_ep = (endpoint_t*) malloc(sizeof(endpoint_t));
+        endpoint_t* new_ep = malloc(sizeof(endpoint_t));
         new_ep->socket = client_socket;
         new_ep->addr = client_addr;
         new_ep->addrlen = client_addrlen;
@@ -101,6 +101,7 @@ void* client_loop(void* args) {
     ssize_t recvd = recv_all(client_sock, (char*) &res_len, sizeof(res_len));
     if(recvd != sizeof(res_len)) {
 		logger_printf(logger, "Error while receiving handshake packet (length part)");
+        close(client_sock);
         free(ep);
 		return NULL;
 	}
@@ -112,15 +113,17 @@ void* client_loop(void* args) {
     recvd = recv_all(client_sock, res_pkt, res_len);
 	if(recvd != res_len) {
         logger_printf(logger, "Error while receiving handshake packet (data part)");
+        close(client_sock);
         free(res_pkt_ptr);
         free(ep);
-		return NULL;
-	}
+        return NULL;
+    }
 
     uint8 op_code = (uint8) *res_pkt++;
     logger_printf(logger, "Client sent me opcode %d", op_code);
     if(op_code != OP_COMPILERS_LIST) {
         logger_printf(logger, "Client is insane (doesn't know anything about compilers)");
+        close(client_sock);
         free(res_pkt_ptr);
         free(ep);
         return NULL;
@@ -128,7 +131,7 @@ void* client_loop(void* args) {
 
     uint8 compilers_count = (uint8) *res_pkt++;
     logger_printf(logger, "Available compilers count: %d", compilers_count);
-    uint16* compilers_ids = (uint16*) malloc(compilers_count * sizeof(uint16));
+    uint16* compilers_ids = malloc(compilers_count * sizeof(uint16));
     for(int i = 0; i < compilers_count; i++) {
         compilers_ids[i] = ntohs(*((uint16*)res_pkt));
         logger_printf(logger, "\tcompiler %d", compilers_ids[i]);
@@ -141,6 +144,7 @@ void* client_loop(void* args) {
     logger_printf(logger, "New client id: %d; Endpoint %s:%d", new_client_id, inet_ntoa(ep->addr.sin_addr), ntohs(ep->addr.sin_port));
     logger_printf(logger, "Filling data structures for new client...");
     client_t* client = client_create(ep, new_client_id);
+    client->recv_pkt = res_pkt_ptr;
     HASH_ADD_INT(clients_map, id, client);
     pthread_mutex_unlock(clients_map_mutex);
 
@@ -153,7 +157,7 @@ void* client_loop(void* args) {
             compiler = compiler_create(compiler_id);
             HASH_ADD_INT(compilers_map, id, compiler);
         }
-        client_id_t* client_id = (client_id_t*) malloc(sizeof(client_id_t));
+        client_id_t* client_id = malloc(sizeof(client_id_t));
         client_id->id = new_client_id;
         HASH_ADD_INT(compiler->clients_list, id, client_id);
     }
@@ -197,9 +201,9 @@ void* client_loop(void* args) {
         }
         logger_printf(logger, "Received something");
         res_len = ntohs(res_len);
-        res_pkt = realloc(res_pkt_ptr, res_len * sizeof(char));
-        res_pkt_ptr = res_pkt;
-        recvd = recv_all(client_sock, res_pkt, res_len);
+        client->recv_pkt = realloc(client->recv_pkt, res_len * sizeof(char));
+        res_pkt = client->recv_pkt;
+        recvd = recv_all(client_sock, client->recv_pkt, res_len);
         if(recvd != res_len) {
             logger_printf(logger, "Broken packet");
             continue;
@@ -224,12 +228,12 @@ void* client_loop(void* args) {
                 pthread_mutex_unlock(client->mutex);
                 solution_free(checked_sln);
                 break;
+            default:
+                break;
         }
     }
 
     logger_printf(logger, "Client loop ended");
-    close(client_sock);
-    free(res_pkt_ptr);
     return NULL;
 }
 
@@ -246,8 +250,8 @@ int process_solutions(client_t* client) {
 
     size_t pkt_length = sizeof(char) + sizeof(sln->id) + sizeof(sln->compiler_id) + sizeof(sln->source_len) + sln->source_len;
     size_t total_length = sizeof(uint16) + pkt_length;
-    char* pkt = (char*) malloc(total_length);
-    char* pkt_ptr = pkt;
+    client->send_pkt = realloc(client->send_pkt, total_length);
+    char* pkt = client->send_pkt;
     *((uint16*)pkt) = htons(pkt_length);
     pkt += sizeof(uint16);
     *pkt++ = OP_CHECK_SLN;
@@ -260,7 +264,7 @@ int process_solutions(client_t* client) {
     memcpy(pkt, sln->source, sln->source_len);
     ssize_t sent;
     do {
-        sent = send_all(client->endpoint->socket, pkt_ptr, (socklen_t) total_length);
+        sent = send_all(client->endpoint->socket, client->send_pkt, (socklen_t) total_length);
         if(sent <= 0) {
             if(errno == EAGAIN || errno == EWOULDBLOCK) {
                 client->last_send_delay += send_timeout.tv_sec;
@@ -456,23 +460,25 @@ void remove_client(uint32 id) {
 }
 
 client_t* client_create(endpoint_t* ep, uint32 id) {
-    client_t* c = (client_t*) malloc(sizeof(client_t));
+    client_t* c = malloc(sizeof(client_t));
     c->id = id;
     c->endpoint = ep;
     c->solutions_queue = queue_init();
     c->checking_solution = NULL;
     c->last_recv_delay = 0;
     c->last_send_delay = 0;
-    c->mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+    c->recv_pkt = NULL;
+    c->send_pkt = NULL;
+    c->mutex = malloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(c->mutex, NULL);
     return c;
 }
 
 compiler_t* compiler_create(uint16 id) {
-    compiler_t* c = (compiler_t*) malloc(sizeof(compiler_t));
+    compiler_t* c = malloc(sizeof(compiler_t));
     c->id = id;
     c->clients_list = NULL;
-    c->list_mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+    c->list_mutex = malloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(c->list_mutex, NULL);
     return c;
 }
@@ -482,7 +488,17 @@ void client_free(client_t* client) {
         return;
     }
     close(client->endpoint->socket);
+    queue_iterate(client->solutions_queue, solution_free);
     queue_struct_free(client->solutions_queue);
+    if(client->checking_solution != NULL) {
+        solution_free(client->checking_solution);
+    }
+    if(client->recv_pkt != NULL) {
+        free(client->recv_pkt);
+    }
+    if(client->send_pkt != NULL) {
+        free(client->send_pkt);
+    }
     free(client->endpoint);
     pthread_mutex_destroy(client->mutex);
     free(client);
@@ -522,6 +538,7 @@ void* local_control_loop(void* args) {
         } else if(strcmp(recv_buf, "stop") == 0) {
             logger_printf(logger, "Received stop request from controller");
             server_running = 0;
+            //Mock client connects to server to wake it up on accept call
             int mock_sock = socket(AF_INET, SOCK_STREAM, 0);
             struct sockaddr_in mock_addr;
             mock_addr.sin_family = AF_INET;

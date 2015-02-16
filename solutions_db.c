@@ -48,7 +48,7 @@ int solutions_extract_new(solution_t** sln_arr_ptr, uint64* sln_arr_len) {
         return 0;
     }
 
-    *sln_arr_ptr = (solution_t*) calloc((*sln_arr_len), sizeof(solution_t));
+    *sln_arr_ptr = calloc((*sln_arr_len), sizeof(solution_t));
     solution_t* cur_ptr = *sln_arr_ptr;
     uint64* rows_lengths;
 
@@ -62,13 +62,13 @@ int solutions_extract_new(solution_t** sln_arr_ptr, uint64* sln_arr_len) {
         cur_ptr->task_id = atoi(row[2]);
         cur_ptr->time = NULL; // @todo converting db string to time
         cur_ptr->source_len = rows_lengths[4] + 1;
-        cur_ptr->source = (char*) calloc(cur_ptr->source_len, sizeof(char));
+        cur_ptr->source = calloc(cur_ptr->source_len, sizeof(char));
         memcpy(cur_ptr->source, row[4], (size_t)cur_ptr->source_len - 1);
         cur_ptr->compiler_id = atoi(row[5]);
         cur_ptr->checking = atoi(row[6]);
         cur_ptr->accepted = atoi(row[7]);
         cur_ptr->response_len = rows_lengths[8];
-        cur_ptr->response = (char*) malloc(cur_ptr->response_len * sizeof(char));
+        cur_ptr->response = malloc(cur_ptr->response_len * sizeof(char));
         memcpy(cur_ptr->response, row[8], cur_ptr->response_len);
     }
 

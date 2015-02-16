@@ -39,14 +39,14 @@ data_block read_string(char* data, uint32 length) {
     block.length = *(data + 3) + (*(data + 2) << 8) + (*(data + 1) << 16) + (*data << 24);
     data += 4;
     length -= 4;
-    block.data = (char*) malloc(block.length * sizeof(char));
+    block.data = malloc(block.length * sizeof(char));
     int real_length = min(length, block.length);
     memcpy(block.data, data, real_length);
     return block;
 }
 
 data_block* block_init(void* data, uint32 length) {
-    data_block* block = (data_block*) malloc(sizeof(data_block));
+    data_block* block = malloc(sizeof(data_block));
     block->length = length;
     block->data = malloc(length * sizeof(char));
     memcpy(block->data, data, length);
@@ -62,7 +62,7 @@ void block_free(data_block* block) {
 }
 
 queue* queue_init() {
-    queue* q = (queue*) malloc(sizeof(queue));
+    queue* q = malloc(sizeof(queue));
     q->elems_count = 0;
     q->head = NULL;
     q->tail = NULL;
@@ -88,7 +88,7 @@ void queue_push(queue* q, void* value) {
     if(q == NULL) {
         return;
     }
-    queue_elem* elem = (queue_elem*) malloc(sizeof(queue_elem));
+    queue_elem* elem = malloc(sizeof(queue_elem));
     elem->value = value;
     elem->next = NULL;
     if(q->elems_count == 0) {
@@ -152,8 +152,8 @@ logger_t* logger_init() {
     fprintf(logfile, "Logging functionality is disabled\n");
 #endif
     fflush(logfile);
-    logger_t* logger = (logger_t*) malloc(sizeof(logger_t));
-    logger->mutex = (pthread_mutex_t*) malloc(sizeof(pthread_mutex_t));
+    logger_t* logger = malloc(sizeof(logger_t));
+    logger->mutex = malloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(logger->mutex, NULL);
     logger->fname = fname;
     logger->fd = logfile;

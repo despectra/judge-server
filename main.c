@@ -25,7 +25,7 @@ void daemon_init(const char* dir) {
         }
         return;
     } else {
-        printf("Daemon has been started successfully\n");
+        printf("Judge Daemon has been started successfully\n");
         exit(EXIT_SUCCESS);
     }
 }

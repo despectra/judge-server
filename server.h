@@ -57,6 +57,8 @@ typedef struct {
     endpoint_t* endpoint;
     queue* solutions_queue;
     solution_t* checking_solution;
+    char* recv_pkt;
+    char* send_pkt;
     uint16 last_recv_delay;
     uint16 last_send_delay;
     pthread_mutex_t* mutex;
